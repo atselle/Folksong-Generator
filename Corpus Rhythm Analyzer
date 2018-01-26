@@ -1,0 +1,51 @@
+from music21 import *
+import os
+import random
+import cPickle as pickle
+
+test = stream.Stream()
+
+dir_name = '/Users/Andrew/Dropbox/FSU/Fall 2015/Doctoral Seminar/altdeu1'
+paths = []
+for root, dirs, files in os.walk(dir_name):
+    for file_name in files:
+        if file_name.endswith('.krn'):
+            paths.append(os.path.join(root, file_name))
+
+def get_bars(corpus, meter):
+    '''Given a corpus, get_bars returns a list of lists of 'meter' bar quarter lengths'''
+    bars = []
+    count = 0
+    for work in corpus:
+        work = converter.parse(work)
+        thismeter = work.flat.getElementsByClass('TimeSignature')
+        if len(thismeter) > 0: #Not all KRN files have time sigs
+            print thismeter[0].ratioString
+            if thismeter[0].ratioString == meter:
+                count += 1
+                for i in range(len(work.measureOffsetMap())-2):#appends bars of given meter to master list
+                    thisbar = work.measure(i+1)
+                    thisdurs = []
+                    for n in thisbar.flat.notes:
+                            thisdurs.append(n.quarterLength)
+                    #print thisdurs
+                    bars.append(thisdurs)
+    print count,'pieces in corpus in',meter
+    #print len(bars)
+    #print bars[0:30]
+    pickle.dump(bars, open("durs.p","wb"))
+    return bars
+
+def make_rhythm(s, durlist):
+    #print mydurs[0:30]
+    for i in range(0,8):
+        thisbar = durlist[random.randint(0, len(durlist))]#pull a random bar
+        for dur in thisbar:
+            s.append(note.Note('C4', quarterLength = dur))
+    s.makeMeasures(inPlace=True)
+    return s
+        
+                
+mydurs = get_bars(paths, '4/4') #use first
+#mydurs = pickle.load(open("durs.p","rb")) #use for subsequent runs
+make_rhythm(test, mydurs)
