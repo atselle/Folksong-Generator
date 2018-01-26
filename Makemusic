@@ -155,9 +155,3 @@ def make_music(s, order):
 #corpus_pitches = get_pitches(paths) #DONT DELETE THIS (Use for first run of new corpus)
 corpus_pitches = pickle.load(open("save.p","rb")) #NEVER DELETE (Use after first)
 #########################################################
-
-make_music(test, 8).show()
-
-##for i in range (1,11): #Makes examples in markov orders 1-10
-##    make_music(test, i)#.show()
-    
