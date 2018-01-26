@@ -1,0 +1,163 @@
+#########################################################
+from music21 import *
+import os
+import random
+import cPickle as pickle
+
+test = stream.Stream()
+    
+dir_name = USE DIRECTORY WHERE XML CORPUS IS LOCATED
+paths = []
+for root, dirs, files in os.walk(dir_name):
+    for file_name in files:
+        if file_name.endswith('.krn'):
+            paths.append(os.path.join(root, file_name))
+
+bars = [[1, 1, 1, 1], [2, 1, 1], [1.5, 0.5, 1.5, 0.5], [1.5, 0.5, 1, 1],
+        [1, 0.5, 0.5, 1, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1],[1.5, 0.5, 1, 1],
+        [1.5, 0.5, 1.5, 0.5],[1.5,0.5,2], [2, 1.5, 0.5], [1.5, 0.5, 0.5, 0.5, 1],
+        [1.5, 0.5, 0.5, 0.5, 0.5, 0.5]]
+
+fin_bars = [[1, 1, 2], [.5,.5,.5,.5,2], [2,2], [1,.5,.5,2], [.5,.5,1,2]]
+#########################################################
+
+def make_rhythm(s):
+    x = 0
+    while x < 3:
+        thisbar = bars[random.randint(0, len(bars)-1)] #choose durs from bars
+        for dur in thisbar:
+            s.append(note.Note('c4', quarterLength = dur))
+        x += 1
+    if x == 3:
+        thisbar = fin_bars[random.randint(0, len(fin_bars)-1)]
+        for dur in thisbar:
+            s.append(note.Note('c4', quarterLength = dur))
+        x += 1
+    while 3 < x < 7:
+        thisbar = bars[random.randint(0, len(bars)-1)]
+        for dur in thisbar:
+            s.append(note.Note('c4', quarterLength = dur))
+        x += 1
+    if x == 7:
+        thisbar = fin_bars[random.randint(0, len(fin_bars)-1)]
+        for dur in thisbar:
+            s.append(note.Note('c4', quarterLength = dur))        
+    s.makeMeasures(inPlace = True)
+    return s
+
+def get_pitches(corpus):
+    plist = [] #master list of lists of pitch-space values
+    '''Takes a list of corpus paths and returns a list containing
+    pitch classes of each piece in the corpus'''
+    for work in corpus:
+        thiswork = converter.parse(str(work))
+        key = thiswork.flat.getElementsByClass('Key')
+        trans = key.elements[0].tonic.pitchClass #transpose to C based on key data
+        thiswork = thiswork.parts[0] #Get only the melody line
+        #trans = thiswork.flat.pitches[-1].pitchClass #USE FOR BACH CHORALES
+        thisplist = [60.0] #list of pitches for each work
+        for n in thiswork.flat.pitches:
+            n.transpose(-trans, inPlace = True)
+            n.accidental = 'natural' #Uncommenting makes everything natural
+##            if len(thisplist) > 0:
+##                if n.ps == thisplist[-1]: #Uncommenting this removes repeated pitches
+##                    continue
+            thisplist.append(n.ps)
+        plist.append(thisplist) #Add work plist to master list
+    pickle.dump(plist, open("save.p","wb"))
+    return plist
+
+def find_ngrams(seq, n):
+    '''Given a list 'seq' returns a list of n-grams
+    as a list of n-tuples.'''
+    #Iterate over seq in n-sized slices each converted to
+    #an n-tuple.
+    return [tuple(seq[i:i+n]) for i in range(len(seq)-n+1)]
+
+def markov_model(seq, order):
+    '''Given a list 'seq' returns a Markov model of the given 'order'
+    as a dictionary. The keys are order-sized tuples. The value for each
+    key is a list of elements in seq that immediately follow
+    occurances of the tuple in the seq.'''       
+    ngrams = [] #list of lists of ngrams for each work
+    for work in seq: #Creates list of ngrams for each work in corpus
+        ngrams.append(find_ngrams(work, order+1))
+    markov = {}
+    #For each n-gram (where n = order + 1) the first
+    #(n - 1) elements are used as the key and the last
+    #element is appended to the list of possible
+    #continuations
+    for thislist in ngrams:
+        for ngram in thislist:
+            try:
+                markov[ngram[:-1]].append(ngram[-1])
+            except KeyError:
+                markov[ngram[:-1]] = [ngram[-1]]
+    return markov
+
+def markov_chain(seq, order, rev = False):
+    '''Given a list 'seq' returns a Markov chain of
+    the given order.'''
+    markov = markov_model(seq, order)
+    if rev == True:
+        seq = seq[::-1]
+        count = 0 #for counting variation in choices
+        for key in markov.keys():
+            count += len(markov[key])
+        print 'ORDER:',order,'AVG CHOICES:',float(count)/len(markov.keys()), 'NGRAMS:', len(markov.keys()), 'CONTINUATIONS:', count
+    #Start chain with an order-gram type that begins with note'C'
+    try:
+        start_keys = [key for key in markov.keys() if key[0] == 60.0]
+    except IndexError:
+        start_keys = markov.keys()
+    key = random.choice(start_keys)
+    chain = [e for e in key]
+    x = 0 + (order + 1)
+    while x <= len(seq):
+        #Choose a random continuation from the elements of
+        #the value for the current key.
+        new = random.choice(markov[key])
+        chain.append(new)
+        x += 1
+        key = (key + (new,))[1:order+1]
+        if key not in markov:
+            break
+    return chain
+
+def make_music(s, order):
+    '''Takes a stream "s" and a markov order number and returns something
+    that hopefully isn't too awful'''
+    s = stream.Stream()
+    r = make_rhythm(s) #stream of rhythmic values
+    p = markov_chain(corpus_pitches, order) #list of pitches
+    q = markov_chain(corpus_pitches, order, rev = True)#backward markov chain
+    x = 0
+    #Superimpose pitches from markov chains on rhythms
+    for n in s.getElementsByClass('Measure')[0:4].flat.notes:
+        n.ps = p[x]
+        x += 1
+    c = len(s.getElementsByClass('Measure')[4:8].flat.notes)
+    for n in s.getElementsByClass('Measure')[4:8].flat.notes:
+        n.ps = q[c - 1] #awful way of iterating backward
+        c -= 1
+    #ATTEMPT TO BRIDGE THE GAP BETWEEN MEASURES 4 AND 5
+    if s.getElementsByClass('Measure')[4].notes[0].ps - s.getElementsByClass('Measure')[3].notes[-1].ps > 7.0:
+        for n in s.getElementsByClass('Measure')[4:8]:
+            n.transpose(-12, inPlace = True)
+    elif s.getElementsByClass('Measure')[4].notes[0].ps - s.getElementsByClass('Measure')[3].notes[-1].ps < -7.0:
+        for n in s.getElementsByClass('Measure')[4:8]:
+            n.transpose(12, inPlace = True)
+    s.insert(metadata.Metadata())
+    s.metadata.title = order
+    return s
+
+#########################################################
+#corpus_pitches = get_pitches(paths) #DONT DELETE THIS (Use for first run of new corpus)
+corpus_pitches = pickle.load(open("save.p","rb")) #NEVER DELETE (Use after first)
+#########################################################
+
+make_music(test, 8).show()
+
+##for i in range (1,11): #Makes examples in markov orders 1-10
+##    make_music(test, i)#.show()
+    
